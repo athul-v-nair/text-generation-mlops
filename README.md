@@ -46,6 +46,7 @@ textgen-mlops/
 ├── docker/
 ├── requirements.txt
 └── README.md
+`
 ---
 
 ### 📚 Dataset
