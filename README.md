@@ -23,7 +23,7 @@ This project is designed to:
 
 ## 📂 Project Structure
 
-````bash
+```bash
 textgen-mlops/
 │
 ├── data/
@@ -46,7 +46,7 @@ textgen-mlops/
 ├── docker/
 ├── requirements.txt
 └── README.md
-`
+```
 ---
 
 ### 📚 Dataset
@@ -87,12 +87,14 @@ We use the GPT-2 tokenizer.
 Each document is tokenized individually and concatenated into a single continuous token stream.
 
 ```python
-self.input_ids = torch.cat(all_input_ids, dim=0)`
+self.input_ids = torch.cat(all_input_ids, dim=0)
+```
 
 This produces a long 1D tensor:
 
 ```python
-[t1, t2, t3, ..., tN]`
+[t1, t2, t3, ..., tN]
+```
 
 ### 🧮 Language Modeling Objective
 
@@ -101,22 +103,26 @@ We train using **causal next-token prediction**.
 For a sequence:
 
 ```python  
-[t1, t2, t3, t4]`
+[t1, t2, t3, t4]
+```
 
 Input (x):
 
 ```python
-[t1, t2, t3, t4]`
+[t1, t2, t3, t4]
+```
 
 Target (y):
 
 ```python   
-[t2, t3, t4, t5]`
+[t2, t3, t4, t5]
+```
 
 This is implemented as:
 
 ```python
-x = input_ids[start:end]  y = input_ids[start + 1:end + 1]`
+x = input_ids[start:end]  y = input_ids[start + 1:end + 1]
+```
 
 Mathematical Formulation
 ------------------------
@@ -124,17 +130,20 @@ Mathematical Formulation
 Given a token sequence:
 
 ```ini
-x=(x1,x2,...,xT)x = (x\_1, x\_2, ..., x\_T)x=(x1​,x2​,...,xT​)`
+x=(x1,x2,...,xT)x = (x\_1, x\_2, ..., x\_T)x=(x1​,x2​,...,xT​)
+```
 
 The model is trained to maximize:
 
 ```ini
-∏_{t=1}^{T} P(x_{t+1} | x_1, ..., x_t)`
+∏_{t=1}^{T} P(x_{t+1} | x_1, ..., x_t)
+```
 
 Loss function used:
 
 ```ini
-L = - ∑_{t=1}^{T} log P(x_{t+1} | x_{≤t})`
+L = - ∑_{t=1}^{T} log P(x_{t+1} | x_{≤t})
+```
 
 This is equivalent to **Cross-Entropy Loss** over next-token predictions.
 
@@ -145,21 +154,21 @@ Sequences are chunked into fixed-length blocks:
 If:
 
 *   Total tokens = NNN
-    
 *   Sequence length = LLL
-    
 
 Then:
 
 ```ini
-num_sequences = floor((N - 1) / L)`
+num_sequences = floor((N - 1) / L)
+```
 
 This ensures valid shifted targets.
 
 Chunks are non-overlapping:
 
 ```csharp
-[0:L]  [L:2L]  [2L:3L]  ...   `
+[0:L]  [L:2L]  [2L:3L]  ...   
+```
 
 This matches standard GPT-style training.
 
@@ -167,8 +176,9 @@ This matches standard GPT-style training.
 
 We fix all major randomness sources:
 
-python```
-random.seed(seed)  np.random.seed(seed)  torch.manual_seed(seed)  torch.cuda.manual_seed_all(seed)   `
+```python
+random.seed(seed)  np.random.seed(seed)  torch.manual_seed(seed)  torch.cuda.manual_seed_all(seed)   
+```
 
 This ensures consistent:
 
@@ -182,27 +192,24 @@ Reproducibility is critical for ML system reliability.
 
 Hyperparameters are stored in:
 
-Plain```   src/config/config.yaml   `
+```plain  
+src/config/config.yaml   
+```
 
 Example:
 
-Plain```
-data:    dataset_name: wikitext    dataset_config: wikitext-2-raw-v1    seq_length: 128  training:    batch_size: 32   `
+```plain  
+data:    dataset_name: wikitext    dataset_config: wikitext-2-raw-v1    seq_length: 128  training:    batch_size: 32   
+```
 
 No hardcoded magic numbers inside training code.
 
 ### 🚀 Current Status (End of Day 1)
 
 ✅ Raw dataset persistence
-
 ✅ Tokenization pipeline
-
 ✅ Processed tensor caching
-
 ✅ Fixed-length sequence chunking
-
 ✅ Shifted next-token targets
-
 ✅ Reproducibility setup
-
 ✅ Config-driven structure
