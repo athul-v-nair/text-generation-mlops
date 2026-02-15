@@ -1,0 +1,7 @@
+data:
+  dataset_name: wikitext
+  dataset_config: wikitext-2-raw-v1
+  seq_length: 128
+
+training:
+  batch_size: 32
