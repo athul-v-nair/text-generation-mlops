@@ -24,7 +24,7 @@ This project is designed to:
 ## 📂 Project Structure
 
 ```bash
-textgen-mlops/
+text-generation-mlops/
 │
 ├── data/
 │   ├── raw/           # Immutable source dataset
@@ -36,6 +36,9 @@ textgen-mlops/
 │   ├── data/
 │   │   └── dataset.py
 │   ├── models/
+│   │   └── transformer.py
+│   │   └── decoder_transformer.py
+│   │   └── positional_embedding.py
 │   ├── training/
 │   ├── inference/
 │   ├── utils/
@@ -204,22 +207,6 @@ data:    dataset_name: wikitext    dataset_config: wikitext-2-raw-v1    seq_leng
 
 No hardcoded magic numbers inside training code.
 
-### 🚀 Current Status (End of Day 1)
-
-✅ Raw dataset persistence
-
-✅ Tokenization pipeline
-
-✅ Processed tensor caching
-
-✅ Fixed-length sequence chunking
-
-✅ Shifted next-token targets
-
-✅ Reproducibility setup
-
-✅ Config-driven structure
-
 ## 🚀 Day 2 — Transformer Architecture Implementation
 
 Day 2 focuses on building the decoder-only Transformer from scratch.
@@ -334,7 +321,7 @@ x = x + Attention(LN(x))
 x = x + FFN(LN(x))
 ```
 
-Why Pre-LN?
+**Why Pre-LN?**
 
 More stable gradients
 
@@ -346,9 +333,11 @@ Residual connections allow gradient flow through deep stacks.
 
 Position-wise MLP:
 
+```
 Linear(C → 4C)
 ReLU
 Linear(4C → C)
+```
 
 Expands representation, applies non-linearity, projects back.
 
@@ -370,7 +359,7 @@ Clean modular architecture
 
 The model is now structurally correct and ready for training experiments.
 
-🔜 Next Phase (Day 3 Preview)
+### 🔜 Next Phase (Day 3 Preview)
 
 Implement training loop
 
