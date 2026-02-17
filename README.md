@@ -207,9 +207,177 @@ No hardcoded magic numbers inside training code.
 ### 🚀 Current Status (End of Day 1)
 
 ✅ Raw dataset persistence
+
 ✅ Tokenization pipeline
+
 ✅ Processed tensor caching
+
 ✅ Fixed-length sequence chunking
+
 ✅ Shifted next-token targets
+
 ✅ Reproducibility setup
+
 ✅ Config-driven structure
+
+## 🚀 Day 2 — Transformer Architecture Implementation
+
+Day 2 focuses on building the decoder-only Transformer from scratch.
+
+### 🏗 Model Overview
+
+**Architecture**:
+
+```bash
+Input Tokens
+    ↓
+Token Embedding
+    ↓
+Positional Embedding
+    ↓
+N × Transformer Blocks
+    ↓
+LayerNorm
+    ↓
+Linear Projection (vocab)
+    ↓
+Logits (B, T, vocab_size)
+```
+
+🔢 Tensor Shapes
+
+Notation:
+
+```
+B = batch size
+
+T = sequence length
+
+C = embedding dimension
+
+H = number of attention heads
+
+head_dim = C / H
+
+Input tokens:
+
+(B, T)
+
+After embedding:
+
+(B, T, C)
+
+Output logits:
+
+(B, T, vocab_size)
+```
+
+### 📍 Positional Embedding
+
+Transformers are permutation invariant. They require explicit positional information.
+
+We use learnable embeddings:
+
+```python
+self.pos_embedding = nn.Embedding(max_seq_len, embed_dim)
+```
+
+Added to token embeddings:
+
+```python
+x = token_embedding + positional_embedding
+```
+
+### 🧠 Multi-Head Self-Attention
+
+Core formula:
+```
+Attention(Q, K, V) = softmax(QKᵀ / √d_k) V
+```
+
+Steps:
+
+```
+Linear projection → Q, K, V
+
+Reshape into multiple heads
+
+Scaled dot-product attention
+
+Concatenate heads
+
+Final projection
+
+Scaling factor:
+
+1 / sqrt(head_dim)
+```
+
+Prevents large dot-product values that destabilize softmax.
+
+### 🔒 Causal Masking
+
+Prevents attending to future tokens.
+
+Lower-triangular mask:
+
+torch.tril(torch.ones(T, T))
+
+Ensures token t only attends to tokens ≤ t.
+
+### 🔁 Transformer Block (Pre-LN)
+
+Structure:
+
+```python
+x = x + Attention(LN(x))
+x = x + FFN(LN(x))
+```
+
+Why Pre-LN?
+
+More stable gradients
+
+Better training dynamics
+
+Residual connections allow gradient flow through deep stacks.
+
+### 🧮 Feed Forward Network
+
+Position-wise MLP:
+
+Linear(C → 4C)
+ReLU
+Linear(4C → C)
+
+Expands representation, applies non-linearity, projects back.
+
+### ✅ End of Day 2 Status
+
+Decoder-only Transformer implemented
+
+Multi-head self-attention working
+
+Causal masking verified
+
+Forward pass validated
+
+Backward pass validated
+
+In-place gradient bug resolved
+
+Clean modular architecture
+
+The model is now structurally correct and ready for training experiments.
+
+🔜 Next Phase (Day 3 Preview)
+
+Implement training loop
+
+Overfit small batch sanity test
+
+Verify loss decreases
+
+Add optimizer + scheduler
+
+Introduce checkpointing

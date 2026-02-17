@@ -36,15 +36,16 @@ class TextGenerationDataset(Dataset):
         # Step 2: Load or create tokens
         # -----------------------------
         
+        # initilizing the tokenizer
+        self.tokenizer=AutoTokenizer.from_pretrained('gpt2')
+        self.tokenizer.pad_token=self.tokenizer.eos_token # setting padding token as End of Sentence token(already known token)
+        
         processed_path=Path('data/processed')
         processed_file=Path(f"data/processed/{split}_tokens.pt")
         
         # Check if folder does not exist OR is empty
         if not processed_path.exists() or not any(processed_path.iterdir()):
-            # initilizing the tokenizer
             print("Starting tokenization")
-            self.tokenizer=AutoTokenizer.from_pretrained('gpt2')
-            self.tokenizer.pad_token=self.tokenizer.eos_token # setting padding token as End of Sentence token(already known token)
 
             all_input_ids = []
 
