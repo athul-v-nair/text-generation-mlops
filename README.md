@@ -204,12 +204,11 @@ Example:
 ```plain  
 data:    dataset_name: wikitext    dataset_config: wikitext-2-raw-v1    seq_length: 128  training:    batch_size: 32   
 ```
+#### ✅ Update - 1
 
-No hardcoded magic numbers inside training code.
+The tokenization pipeline is implemented
 
-## 🚀 Day 2 — Transformer Architecture Implementation
-
-Day 2 focuses on building the decoder-only Transformer from scratch.
+##  Transformer Architecture Implementation
 
 ### 🏗 Model Overview
 
@@ -231,7 +230,7 @@ Linear Projection (vocab)
 Logits (B, T, vocab_size)
 ```
 
-🔢 Tensor Shapes
+🔢 **Tensor Shapes**
 
 Notation:
 
@@ -341,32 +340,145 @@ Linear(4C → C)
 
 Expands representation, applies non-linearity, projects back.
 
-### ✅ End of Day 2 Status
-
-Decoder-only Transformer implemented
-
-Multi-head self-attention working
-
-Causal masking verified
-
-Forward pass validated
-
-Backward pass validated
-
-In-place gradient bug resolved
-
-Clean modular architecture
+#### ✅ Update - 2
 
 The model is now structurally correct and ready for training experiments.
 
-### 🔜 Next Phase (Day 3 Preview)
+## Training System Implementation
 
-Implement training loop
+### Core training procedure:
 
-Overfit small batch sanity test
+```python
+self.model.train()
+logits = self.model(batch)
+logits, targets = self.shift_logits_targets(logits, batch)
+loss = CrossEntropy(logits, targets)
+loss.backward()
+clip_grad_norm_(parameters, 1.0)
+optimizer.step()
+scheduler.step()
+Step-by-step Explanation
 
-Verify loss decreases
+model.train()
+Enables dropout and training-specific behavior.
 
-Add optimizer + scheduler
+Forward pass
+Produces logits of shape (B, T, vocab_size).
 
-Introduce checkpointing
+Shift logits and targets
+Aligns predictions with next-token targets.
+
+Loss computation
+Cross-entropy applied over reshaped tensors:
+
+logits.reshape(-1, vocab_size)
+targets.reshape(-1)
+
+Backward pass
+Computes gradients for all parameters.
+
+Gradient clipping
+Prevents exploding gradients.
+
+Optimizer step
+Updates parameters.
+
+Scheduler step
+Updates learning rate per training step.
+```
+
+### 🧮 Gradient Norm Monitoring
+
+Observed total gradient norm:
+
+≈ 220
+
+Gradient norm formula:
+
+```latex
+∥g∥=∑i∥gi∥2\|g\| = \sqrt{\sum_i \|g_i\|^2}∥g∥=i∑​∥gi​∥2​
+```
+
+If norm exceeds threshold (1.0):
+
+```latex
+g←g⋅max_norm∥g∥g \leftarrow g \cdot \frac{\text{max\_norm}}{\|g\|}g←g⋅∥g∥max_norm​
+```
+
+This stabilizes deep Transformer training.
+
+### 📉 Optimizer Experiments
+
+#### Tested:
+
+AdamW → Stable convergence
+
+SGD → Large loss oscillations
+
+Why AdamW Works Better
+
+AdamW normalizes updates by gradient variance, which is critical for Transformers.
+
+#### 📈 Learning Rate Scheduling
+
+
+**Linear Warmup**
+
+Gradually increases LR from near zero
+
+```latex
+lrt=lrmax⋅twarmup_stepslr_t = lr_{max} \cdot \frac{t}{\text{warmup\_steps}}lrt​=lrmax​⋅warmup_stepst​
+```
+
+Prevents unstable early updates.
+
+**Cosine Annealing**
+
+```latex
+lrt=lrmin+12(lrmax−lrmin)(1+cos⁡(tTπ))lr_t = lr_{min} + \frac{1}{2}(lr_{max} - lr_{min})
+\left(1 + \cos\left(\frac{t}{T}\pi\right)\right)lrt​=lrmin​+21​(lrmax​−lrmin​)(1+cos(Tt​π))
+```
+
+Provides smooth decay and stable convergence.
+
+#### 🧪 Overfitting Sanity Test
+
+Before real training, we intentionally overfit a small random batch.
+
+Purpose:
+
+Verify gradient flow
+
+Ensure loss decreases
+
+Validate architecture correctness
+
+If the model cannot overfit one batch → implementation bug.
+
+Result: Loss decreased successfully.
+
+### 💾 Checkpointing
+
+Saved components:
+
+model.state_dict()
+
+optimizer.state_dict()
+
+scheduler.state_dict()
+
+Step count
+
+This enables:
+
+Training resumption
+
+Experiment reproducibility
+
+Model comparison
+
+Checkpoints are excluded from Git using .gitignore.
+
+#### ✅ Update - 3
+
+Training loop successfully implemented.
