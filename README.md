@@ -49,6 +49,15 @@ The codebase is structured with MLOps discipline in mind: reproducible data pipe
 
 ---
 
+## 📚 Detailed Guides
+
+New to training Transformers or need step-by-step guidance? Check out these comprehensive guides:
+
+- **[TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md)** — Complete walkthrough of the training process, hyperparameter tuning, monitoring, troubleshooting, and GPU setup
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** — How to evaluate your trained model on the test set, interpret metrics, and compare results
+
+---
+
 ## Key Design Decisions
 
 | Decision | Choice | Rationale |
@@ -320,7 +329,7 @@ Each checkpoint contains the full training state:
     "model_state_dict":     model.state_dict(),
     "optimizer_state_dict": optimizer.state_dict(),
     "scheduler_state_dict": scheduler.state_dict(),
-    "step":          step,
+    "global_step":          step,
     "epoch":                epoch,
 }
 ```
@@ -386,9 +395,14 @@ text-generation-mlops/
 │   ├── raw/                          # Immutable downloaded dataset (never modified)
 │   └── processed/                    # Tokenized tensors (.pt files)
 │
+├── docs/
+│   ├── TRAINING_GUIDE.md             # Comprehensive training guide
+│   └── TESTING_GUIDE.md              # Model evaluation guide
+│
 ├── runs/
 │   └── experiment_1/
 │       ├── metrics.jsonl             # Per-epoch training + validation metrics
+│       ├── test_results.yaml         # Final test set results
 │       └── checkpoints/
 │           ├── last.pt               # Latest epoch checkpoint (for resumption)
 │           └── best.pt               # Best val_loss checkpoint (for inference)
@@ -407,10 +421,11 @@ text-generation-mlops/
 │   │
 │   ├── training/
 │   │   ├── train.py                  # Entry point: wires dataset, model, optimizer, trainer
+│   │   ├── test.py                   # Evaluation script for test set
 │   │   ├── trainer.py                # Training loop: train_step, train_epoch, fit
 │   │   ├── evaluator.py              # Validation loop + perplexity computation
 │   │   ├── logger.py                 # JSONL metric logging (decoupled from Trainer)
-│   │   └── checkpoint.py            # save_checkpoint / load_checkpoint utilities
+│   │   └── checkpoint.py             # save_checkpoint / load_checkpoint utilities
 │   │
 │   └── utils/
 │       └── seed.py                   # Global reproducibility seeding
@@ -469,20 +484,20 @@ python src/data/dataset.py
 # 4. Train (runs full training + validation loop with early stopping)
 python src/training/train.py
 
-# 5. Monitor training metrics
+# 5. Test the trained model
+python src/training/test.py
+
+# 6. Monitor training metrics
 python -c "
 import pandas as pd
 df = pd.read_json('runs/experiment_1/metrics.jsonl', lines=True)
 print(df[['epoch','train_loss','val_loss','val_perplexity']].to_string())
 "
 ```
----
 
 **📖 For detailed instructions:**
 - **Training**: See [TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md) for hyperparameter tuning, monitoring, and troubleshooting
 - **Testing**: See [TESTING_GUIDE.md](docs/TESTING_GUIDE.md) for evaluating your model on test data
-
----
 
 ---
 
@@ -495,8 +510,11 @@ print(df[['epoch','train_loss','val_loss','val_perplexity']].to_string())
 - [x] Early stopping with patience
 - [x] Dual checkpointing (`last.pt` / `best.pt`)
 - [x] JSONL metric logging (decoupled Logger)
+- [x] Test set evaluation
+- [x] Comprehensive training and testing guides
 - [ ] Experiment tracking (MLflow / Weights & Biases)
 - [ ] Loss curve visualisation script
+- [ ] Text generation inference script
 - [ ] REST API serving (FastAPI)
 - [ ] Dockerized deployment
 - [ ] CI/CD pipeline (GitHub Actions)
