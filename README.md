@@ -1,484 +1,523 @@
-# 🧠 Text Generation Transformer (From Scratch + MLOps)
+# Text Generation Transformer — From Scratch
 
-A minimal, production-structured decoder-only Transformer built in PyTorch and trained on WikiText-2.
+> A decoder-only Transformer built entirely with PyTorch primitives, trained on WikiText-2 with a full training + validation pipeline and production-structured MLOps conventions.
 
-This project is designed to:
-
-- Deepen understanding of Transformer mechanics  
-- Implement clean ML engineering practices  
-- Apply reproducible data pipelines  
-- Incrementally introduce MLOps discipline  
+![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=flat-square&logo=pytorch)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=flat-square)
 
 ---
 
-## 📌 Project Goals
+## Table of Contents
 
-- Build a decoder-only Transformer from scratch (using PyTorch primitives)  
-- Train using next-token prediction objective  
-- Implement structured data pipeline (raw → processed)  
-- Ensure reproducibility  
-- Prepare foundation for experiment tracking and deployment  
+- [Overview](#overview)
+- [Key Design Decisions](#key-design-decisions)
+- [Architecture](#architecture)
+- [Core Components](#core-components)
+  - [Multi-Head Causal Self-Attention](#multi-head-causal-self-attention)
+  - [Feed-Forward Network](#feed-forward-network)
+  - [Pre-Layer Normalization](#pre-layer-normalization)
+- [Training System](#training-system)
+  - [Language Modeling Objective](#language-modeling-objective)
+  - [Training Loop](#training-loop)
+  - [Gradient Clipping](#gradient-clipping)
+  - [Optimizer](#optimizer)
+  - [Learning Rate Schedule](#learning-rate-schedule)
+- [Validation & Evaluation](#validation--evaluation)
+  - [Validation Loop](#validation-loop)
+  - [Perplexity Metric](#perplexity-metric)
+  - [Early Stopping & Best Model Tracking](#early-stopping--best-model-tracking)
+- [Metric Logging](#metric-logging)
+- [Checkpointing](#checkpointing)
+- [Data Pipeline](#data-pipeline)
+- [Reproducibility](#reproducibility)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Quickstart](#quickstart)
+- [Roadmap](#roadmap)
+- [Dependencies](#dependencies)
+- [References](#references)
 
 ---
 
-## 📂 Project Structure
+## Overview
 
-```bash
+This project implements a GPT-style, decoder-only Transformer **from scratch** — no `transformers` library, no high-level wrappers. Every component (attention, positional encoding, training loop, validation loop, scheduling) is written directly in PyTorch to demonstrate both architectural understanding and clean ML engineering practice.
+
+The codebase is structured with MLOps discipline in mind: reproducible data pipelines, YAML-based configuration, token-weighted loss aggregation, perplexity tracking, early stopping, dual checkpointing (`last.pt` / `best.pt`), and structured JSONL metric logging.
+
+---
+
+## Key Design Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Architecture | Decoder-only Transformer | Suited for autoregressive text generation (GPT-style) |
+| Positional Encoding | Learnable embeddings | Simpler than sinusoidal; competitive on short sequences |
+| Layer Normalization | Pre-LN (before attention/FFN) | More stable gradients; avoids vanishing gradient pathology in deep stacks |
+| Optimizer | AdamW | Adaptive gradient scaling critical for Transformer stability; SGD was tested and discarded |
+| LR Schedule | Linear warmup + cosine annealing | Prevents unstable early updates; smooth decay through training |
+| Tokenizer | GPT-2 BPE | Standard, well-understood; consistent with the training objective |
+| Loss aggregation | Token-weighted sum | Avoids batch-size bias when computing average loss across variable-length batches |
+| Validation metric | Perplexity (`exp(avg_loss)`) | Standard LM benchmark metric; interpretable as effective vocabulary size the model is "choosing between" |
+| Early stopping | Patience-based on `val_loss` | Prevents overfitting; saves compute when validation stops improving |
+| Checkpointing | Dual: `last.pt` + `best.pt` | `last.pt` enables resumption; `best.pt` captures peak generalisation |
+| Metric logging | JSONL append-log | Machine-readable, easy to parse for plotting; decoupled from Trainer |
+
+---
+
+## Architecture
+
+```
+Input Tokens  (B, T)
+      ↓
+Token Embedding  +  Positional Embedding    →  (B, T, C)
+      ↓
+N × Transformer Block
+  ├── Pre-LayerNorm
+  ├── Multi-Head Causal Self-Attention
+  ├── Residual Connection
+  ├── Pre-LayerNorm
+  ├── Position-wise FFN  [C → 4C → C]
+  └── Residual Connection
+      ↓
+Final LayerNorm
+      ↓
+Linear Projection  →  (B, T, vocab_size)
+      ↓
+Logits
+```
+
+**Tensor shape notation:** `B` = batch size · `T` = sequence length · `C` = embedding dimension · `V` = vocabulary size
+
+---
+
+## Core Components
+
+### Multi-Head Causal Self-Attention
+
+Each attention head computes:
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right) V$$
+
+where `d_k = C / num_heads`. The `1/√d_k` scaling prevents large dot-products from saturating the softmax and collapsing gradient flow.
+
+A lower-triangular causal mask is applied before softmax, ensuring token `t` only attends to positions `≤ t`:
+
+```python
+mask = torch.tril(torch.ones(T, T))
+scores = scores.masked_fill(mask == 0, float('-inf'))
+```
+
+### Feed-Forward Network
+
+A position-wise two-layer MLP applied identically to each token:
+
+```
+Linear(C → 4C) → ReLU → Linear(4C → C)
+```
+
+The 4× expansion factor follows the original "Attention Is All You Need" design, giving the model enough capacity to learn rich per-token representations before projecting back.
+
+### Pre-Layer Normalization
+
+LayerNorm is applied **before** each sublayer (Pre-LN convention), not after:
+
+```python
+x = x + Attention(LayerNorm(x))
+x = x + FFN(LayerNorm(x))
+```
+
+This makes gradient norms more predictable across depth and allows training without additional learning rate tricks.
+
+---
+
+## Training System
+
+### Language Modeling Objective
+
+Given a token sequence `(x₁, x₂, ..., xₜ)`, the model is trained to maximise:
+
+$$\mathcal{L} = -\sum_{t=1}^{T} \log P(x_{t+1} \mid x_{\leq t})$$
+
+Input and target sequences are constructed with a one-position offset. Both `Trainer` and `Evaluator` apply the same shift before computing loss:
+
+```python
+logits  = logits[:, :-1, :]    # (B, T-1, V)  — drop last prediction
+targets = input_ids[:, 1:]     # (B, T-1)     — drop first token
+```
+
+This ensures the model never sees the token it's predicting.
+
+### Training Loop
+
+The training lifecycle is split across three methods in `Trainer`:
+
+```
+fit()
+ └── for each epoch:
+       train_epoch()
+        └── for each batch:
+              train_step()
+                ├── forward pass         → logits (B, T, V)
+                ├── shift logits/targets → (B, T-1, V) / (B, T-1)
+                ├── cross-entropy loss
+                ├── zero_grad()
+                ├── loss.backward()
+                ├── clip_grad_norm_(max=1.0)
+                ├── optimizer.step()
+                └── scheduler.step()
+       evaluator.evaluate()
+       logger.log()
+       save_checkpoint(last.pt)
+       save_checkpoint(best.pt)   ← only if val_loss improved
+       early stopping check
+```
+
+Loss is accumulated **token-weighted** across the epoch to avoid batch-size bias:
+
+```python
+total_loss += loss.item() * targets.numel()   # weight by token count
+total_tokens += targets.numel()
+avg_loss = total_loss / total_tokens          # true per-token average
+```
+
+### Gradient Clipping
+
+The total gradient norm is clipped to `1.0` after every backward pass:
+
+$$g \leftarrow g \cdot \frac{\text{max\_norm}}{\|g\|} \quad \text{where} \quad \|g\| = \sqrt{\sum_i \|g_i\|^2}$$
+
+An observed pre-clip gradient norm of ~220 confirms this is a necessary safeguard for stable Transformer training.
+
+### Optimizer
+
+AdamW is used with configurable weight decay:
+
+```python
+optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+```
+
+SGD was tested and produced large loss oscillations. AdamW's per-parameter adaptive scaling is critical for Transformers, where gradient magnitudes vary significantly across layers.
+
+### Learning Rate Schedule
+
+**Linear warmup** — ramps LR from 1% of peak to full over `warmup_steps`:
+
+$$lr_t = lr_{\max} \cdot \frac{t}{\text{warmup\_steps}}$$
+
+**Cosine annealing** — smooth decay after warmup:
+
+$$lr_t = lr_{\min} + \frac{1}{2}(lr_{\max} - lr_{\min})\left(1 + \cos\!\left(\frac{t}{T}\pi\right)\right)$$
+
+Implemented as `SequentialLR(LinearLR, CosineAnnealingLR)` with the milestone at `warmup_steps`.
+
+---
+
+## Validation & Evaluation
+
+### Validation Loop
+
+`Evaluator.evaluate()` runs after every training epoch. Key implementation details:
+
+```python
+self.model.eval()                   # disables dropout
+with torch.no_grad():               # no gradient tracking
+    for batch in dataloader:
+        logits = self.model(input_ids)
+        logits, targets = self.shift_logits_targets(logits, input_ids)
+        loss = criterion(logits.reshape(-1, V), targets.reshape(-1))
+
+        total_loss   += loss.item() * targets.numel()   # token-weighted accumulation
+        total_tokens += targets.numel()
+
+avg_loss   = total_loss / total_tokens
+perplexity = math.exp(avg_loss)
+```
+
+Two key design choices:
+- `model.eval()` correctly disables dropout so validation scores reflect inference-time behaviour, not stochastic training behaviour.
+- `torch.no_grad()` eliminates gradient bookkeeping, cutting memory usage and speeding up the validation pass.
+
+### Perplexity Metric
+
+Perplexity is the primary evaluation metric for language models:
+
+$$\text{PPL} = \exp\!\left(\frac{1}{N}\sum_{t=1}^{N} -\log P(x_{t+1} \mid x_{\leq t})\right) = e^{\mathcal{L}_{\text{avg}}}$$
+
+Intuitively, PPL represents the effective number of equally likely tokens the model is "choosing between" at each position. A PPL of 100 means the model is as uncertain as if it were picking uniformly from 100 tokens. Lower is better.
+
+```python
+def calc_perplexity(loss: float) -> float:
+    return math.exp(loss)
+```
+
+Both `val_loss` and `val_perplexity` are logged each epoch, giving a complete picture of generalisation quality.
+
+### Early Stopping & Best Model Tracking
+
+`Trainer.fit()` implements patience-based early stopping against validation loss:
+
+```python
+patience = config["training"].get("patience", 5)   # default: 5 epochs
+epochs_without_improvement = 0
+
+if val_loss < self.best_val_loss:
+    self.best_val_loss = val_loss
+    save_checkpoint(..., "best.pt")      # save new best
+else:
+    epochs_without_improvement += 1
+
+if epochs_without_improvement >= patience:
+    print("Early stopping triggered.")
+    break
+```
+
+`best_val_loss` is initialised to `float("inf")`, so the first epoch always saves a best checkpoint. The counter only increments on epochs where validation loss does **not** improve, so a single bad epoch won't terminate training prematurely.
+
+---
+
+## Metric Logging
+
+`Logger` is a deliberately thin class, kept separate from `Trainer` to maintain single-responsibility:
+
+```python
+logger.log({
+    "epoch":           epoch,
+    "train_loss":      train_loss,
+    "val_loss":        val_loss,
+    "val_perplexity":  val_ppl,
+    "epoch_time_sec":  epoch_time,
+    "global_step":     self.global_step,
+    "current_lr":      current_lr,
+})
+```
+
+Metrics are written to `runs/experiment_1/metrics.jsonl` in newline-delimited JSON format — one record per epoch. This makes downstream analysis trivial:
+
+```python
+import pandas as pd
+df = pd.read_json("runs/experiment_1/metrics.jsonl", lines=True)
+df.plot(x="epoch", y=["train_loss", "val_loss"])
+```
+
+---
+
+## Checkpointing
+
+Two checkpoints are maintained per run:
+
+| File | Saved when | Purpose |
+|---|---|---|
+| `checkpoints/last.pt` | Every epoch | Resume training after interruption |
+| `checkpoints/best.pt` | `val_loss` improves | Best generalising model for inference |
+
+Each checkpoint contains the full training state:
+
+```python
+{
+    "model_state_dict":     model.state_dict(),
+    "optimizer_state_dict": optimizer.state_dict(),
+    "scheduler_state_dict": scheduler.state_dict(),
+    "global_step":          step,
+    "epoch":                epoch,
+}
+```
+
+Checkpoint files are excluded from version control via `.gitignore`.
+
+---
+
+## Data Pipeline
+
+```
+HuggingFace datasets (wikitext-2-raw-v1)
+          ↓
+  data/raw/            ← immutable source, persisted to disk on first run
+          ↓
+  GPT-2 Tokenizer      ← each document tokenized individually, then concatenated
+          ↓
+  data/processed/      ← token tensors (.pt), loaded directly on subsequent runs
+          ↓
+  DataLoader (train)   ← shuffle=True
+  DataLoader (val)     ← shuffle=False
+```
+
+Documents are tokenized independently then concatenated into a single flat 1D tensor:
+
+```python
+self.input_ids = torch.cat(all_input_ids, dim=0)   # shape: (N,)
+```
+
+Fixed-length non-overlapping sequences are chunked for batching:
+
+```
+num_sequences = floor((N - 1) / seq_len)
+chunks: [0:L], [L:2L], [2L:3L], ...
+```
+
+---
+
+## Reproducibility
+
+All random sources are seeded at the top of `train.py`:
+
+```python
+set_seed(42)
+
+# inside set_seed():
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+```
+
+This guarantees consistent weight initialisation, data shuffling order, and dropout behaviour across runs.
+
+---
+
+## Project Structure
+
+```
 text-generation-mlops/
 │
 ├── data/
-│   ├── raw/           # Immutable source dataset
-│   ├── processed/     # Tokenized tensors (.pt files)
+│   ├── raw/                          # Immutable downloaded dataset (never modified)
+│   └── processed/                    # Tokenized tensors (.pt files)
+│
+├── runs/
+│   └── experiment_1/
+│       ├── metrics.jsonl             # Per-epoch training + validation metrics
+│       └── checkpoints/
+│           ├── last.pt               # Latest epoch checkpoint (for resumption)
+│           └── best.pt               # Best val_loss checkpoint (for inference)
 │
 ├── src/
 │   ├── config/
-│   │   └── config.yaml
+│   │   └── config.yaml               # Single source of truth for all hyperparameters
+│   │
 │   ├── data/
-│   │   └── dataset.py
-│   ├── models/
-│   │   └── transformer.py
-│   │   └── decoder_transformer.py
-│   │   └── positional_embedding.py
+│   │   └── dataset.py                # Download → tokenize → cache pipeline
+│   │
+│   ├── model/
+│   │   ├── transformer.py            # Top-level model (embedding + block stack + head)
+│   │   ├── decoder_transformer.py    # Transformer block (attention + FFN + residuals)
+│   │   └── positional_embedding.py  # Learnable positional embeddings
+│   │
 │   ├── training/
-│   ├── inference/
-│   ├── utils/
-│   │   └── seed.py
+│   │   ├── train.py                  # Entry point: wires dataset, model, optimizer, trainer
+│   │   ├── trainer.py                # Training loop: train_step, train_epoch, fit
+│   │   ├── evaluator.py              # Validation loop + perplexity computation
+│   │   ├── logger.py                 # JSONL metric logging (decoupled from Trainer)
+│   │   └── checkpoint.py            # save_checkpoint / load_checkpoint utilities
+│   │
+│   └── utils/
+│       └── seed.py                   # Global reproducibility seeding
 │
-├── tests/
-├── api/
-├── docker/
+├── .gitignore
 ├── requirements.txt
 └── README.md
 ```
----
-
-### 📚 Dataset
-
-We use:
-
-**WikiText-2 (`wikitext-2-raw-v1`)**  
-A standard language modeling benchmark dataset.
 
 ---
 
-### 🔄 Data Pipeline
+## Configuration
 
-#### First Run
+All hyperparameters are centralised in `src/config/config.yaml`:
 
-1. Dataset is downloaded using HuggingFace `datasets`
-2. Saved to `data/raw/`
-3. Tokenized using GPT-2 tokenizer
-4. Token tensors saved to `data/processed/`
+```yaml
+device: cuda
 
-#### Subsequent Runs
+data:
+  dataset_name: wikitext
+  dataset_config: wikitext-2-raw-v1
+  seq_length: 128
 
-- Raw dataset loaded from disk  
-- Tokenized tensors loaded directly (no reprocessing)
+model:
+  dim_model: 256
+  num_heads: 8
+  num_layers: 4
+  dim_ff: 1024
 
-This ensures:
-
-- Reproducibility  
-- Faster iteration  
-- Clean raw vs processed separation  
+training:
+  epochs: 20
+  batch_size: 32
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 200
+  num_steps: 5000
+  dropout: 0.1
+  patience: 5           # early stopping patience (epochs)
+```
 
 ---
 
-### 🔤 Tokenization Strategy
-
-We use the GPT-2 tokenizer.
-
-Each document is tokenized individually and concatenated into a single continuous token stream.
-
-```python
-self.input_ids = torch.cat(all_input_ids, dim=0)
-```
-
-This produces a long 1D tensor:
-
-```python
-[t1, t2, t3, ..., tN]
-```
-
-### 🧮 Language Modeling Objective
-
-We train using **causal next-token prediction**.
-
-For a sequence:
-
-```python  
-[t1, t2, t3, t4]
-```
-
-Input (x):
-
-```python
-[t1, t2, t3, t4]
-```
-
-Target (y):
-
-```python   
-[t2, t3, t4, t5]
-```
-
-This is implemented as:
-
-```python
-x = input_ids[start:end]  y = input_ids[start + 1:end + 1]
-```
-
-Mathematical Formulation
-------------------------
-
-Given a token sequence:
-
-```ini
-x=(x1,x2,...,xT)x = (x\_1, x\_2, ..., x\_T)x=(x1​,x2​,...,xT​)
-```
-
-The model is trained to maximize:
-
-```ini
-∏_{t=1}^{T} P(x_{t+1} | x_1, ..., x_t)
-```
-
-Loss function used:
-
-```ini
-L = - ∑_{t=1}^{T} log P(x_{t+1} | x_{≤t})
-```
-
-This is equivalent to **Cross-Entropy Loss** over next-token predictions.
-
-### 📦 Dataset Construction
-
-Sequences are chunked into fixed-length blocks:
-
-If:
-
-*   Total tokens = NNN
-*   Sequence length = LLL
-
-Then:
-
-```ini
-num_sequences = floor((N - 1) / L)
-```
-
-This ensures valid shifted targets.
-
-Chunks are non-overlapping:
-
-```csharp
-[0:L]  [L:2L]  [2L:3L]  ...   
-```
-
-This matches standard GPT-style training.
-
-### 🔁 Reproducibility
-
-We fix all major randomness sources:
-
-```python
-random.seed(seed)  np.random.seed(seed)  torch.manual_seed(seed)  torch.cuda.manual_seed_all(seed)   
-```
-
-This ensures consistent:
-
-*   Weight initialization
-*   Data shuffling
-*   Dropout behavior (as much as possible)
-
-Reproducibility is critical for ML system reliability.
-
-### ⚙️ Configuration Management
-
-Hyperparameters are stored in:
-
-```plain  
-src/config/config.yaml   
-```
-
-Example:
-
-```plain  
-data:    dataset_name: wikitext    dataset_config: wikitext-2-raw-v1    seq_length: 128  training:    batch_size: 32   
-```
-#### ✅ Update - 1
-
-The tokenization pipeline is implemented
-
-##  Transformer Architecture Implementation
-
-### 🏗 Model Overview
-
-**Architecture**:
+## Quickstart
 
 ```bash
-Input Tokens
-    ↓
-Token Embedding
-    ↓
-Positional Embedding
-    ↓
-N × Transformer Blocks
-    ↓
-LayerNorm
-    ↓
-Linear Projection (vocab)
-    ↓
-Logits (B, T, vocab_size)
+# 1. Clone the repo
+git clone https://github.com/athul-v-nair/text-generation-mlops.git
+cd text-generation-mlops
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Run data pipeline (downloads WikiText-2, tokenizes, caches to disk)
+python src/data/dataset.py
+
+# 4. Train (runs full training + validation loop with early stopping)
+python src/training/train.py
+
+# 5. Monitor training metrics
+python -c "
+import pandas as pd
+df = pd.read_json('runs/experiment_1/metrics.jsonl', lines=True)
+print(df[['epoch','train_loss','val_loss','val_perplexity']].to_string())
+"
 ```
 
-🔢 **Tensor Shapes**
+---
 
-Notation:
+## Roadmap
 
-```
-B = batch size
+- [x] Tokenization pipeline (WikiText-2)
+- [x] Decoder-only Transformer (attention, FFN, causal masking, Pre-LN)
+- [x] Training loop with gradient clipping, AdamW, LR scheduling
+- [x] Validation loop with perplexity computation
+- [x] Early stopping with patience
+- [x] Dual checkpointing (`last.pt` / `best.pt`)
+- [x] JSONL metric logging (decoupled Logger)
+- [ ] Experiment tracking (MLflow / Weights & Biases)
+- [ ] Loss curve visualisation script
+- [ ] REST API serving (FastAPI)
+- [ ] Dockerized deployment
+- [ ] CI/CD pipeline (GitHub Actions)
 
-T = sequence length
+---
 
-C = embedding dimension
+## Dependencies
 
-H = number of attention heads
+| Package | Purpose |
+|---|---|
+| `torch` | Model, training, tensor ops |
+| `datasets` | WikiText-2 download and caching |
+| `transformers` | GPT-2 tokenizer only |
+| `pyyaml` | Config loading |
+| `numpy` | Seeding, preprocessing utils |
 
-head_dim = C / H
+---
 
-Input tokens:
+## References
 
-(B, T)
+- Vaswani et al., [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) (2017)
+- Radford et al., [*Language Models are Unsupervised Multitask Learners*](https://openai.com/research/language-unsupervised) (GPT-2, 2019)
+- Xiong et al., [*On Layer Normalization in the Transformer Architecture*](https://arxiv.org/abs/2002.04745) (Pre-LN analysis, 2020)
 
-After embedding:
+---
 
-(B, T, C)
+## Author
 
-Output logits:
+**Athul V Nair** — [GitHub](https://github.com/athul-v-nair)
 
-(B, T, vocab_size)
-```
-
-### 📍 Positional Embedding
-
-Transformers are permutation invariant. They require explicit positional information.
-
-We use learnable embeddings:
-
-```python
-self.pos_embedding = nn.Embedding(max_seq_len, embed_dim)
-```
-
-Added to token embeddings:
-
-```python
-x = token_embedding + positional_embedding
-```
-
-### 🧠 Multi-Head Self-Attention
-
-Core formula:
-```
-Attention(Q, K, V) = softmax(QKᵀ / √d_k) V
-```
-
-Steps:
-
-```
-Linear projection → Q, K, V
-
-Reshape into multiple heads
-
-Scaled dot-product attention
-
-Concatenate heads
-
-Final projection
-
-Scaling factor:
-
-1 / sqrt(head_dim)
-```
-
-Prevents large dot-product values that destabilize softmax.
-
-### 🔒 Causal Masking
-
-Prevents attending to future tokens.
-
-Lower-triangular mask:
-
-torch.tril(torch.ones(T, T))
-
-Ensures token t only attends to tokens ≤ t.
-
-### 🔁 Transformer Block (Pre-LN)
-
-Structure:
-
-```python
-x = x + Attention(LN(x))
-x = x + FFN(LN(x))
-```
-
-**Why Pre-LN?**
-
-More stable gradients
-
-Better training dynamics
-
-Residual connections allow gradient flow through deep stacks.
-
-### 🧮 Feed Forward Network
-
-Position-wise MLP:
-
-```
-Linear(C → 4C)
-ReLU
-Linear(4C → C)
-```
-
-Expands representation, applies non-linearity, projects back.
-
-#### ✅ Update - 2
-
-The model is now structurally correct and ready for training experiments.
-
-## Training System Implementation
-
-### Core training procedure:
-
-```python
-self.model.train()
-logits = self.model(batch)
-logits, targets = self.shift_logits_targets(logits, batch)
-loss = CrossEntropy(logits, targets)
-loss.backward()
-clip_grad_norm_(parameters, 1.0)
-optimizer.step()
-scheduler.step()
-Step-by-step Explanation
-
-model.train()
-Enables dropout and training-specific behavior.
-
-Forward pass
-Produces logits of shape (B, T, vocab_size).
-
-Shift logits and targets
-Aligns predictions with next-token targets.
-
-Loss computation
-Cross-entropy applied over reshaped tensors:
-
-logits.reshape(-1, vocab_size)
-targets.reshape(-1)
-
-Backward pass
-Computes gradients for all parameters.
-
-Gradient clipping
-Prevents exploding gradients.
-
-Optimizer step
-Updates parameters.
-
-Scheduler step
-Updates learning rate per training step.
-```
-
-### 🧮 Gradient Norm Monitoring
-
-Observed total gradient norm:
-
-≈ 220
-
-Gradient norm formula:
-
-```latex
-∥g∥=∑i∥gi∥2\|g\| = \sqrt{\sum_i \|g_i\|^2}∥g∥=i∑​∥gi​∥2​
-```
-
-If norm exceeds threshold (1.0):
-
-```latex
-g←g⋅max_norm∥g∥g \leftarrow g \cdot \frac{\text{max\_norm}}{\|g\|}g←g⋅∥g∥max_norm​
-```
-
-This stabilizes deep Transformer training.
-
-### 📉 Optimizer Experiments
-
-#### Tested:
-
-AdamW → Stable convergence
-
-SGD → Large loss oscillations
-
-Why AdamW Works Better
-
-AdamW normalizes updates by gradient variance, which is critical for Transformers.
-
-#### 📈 Learning Rate Scheduling
-
-
-**Linear Warmup**
-
-Gradually increases LR from near zero
-
-```latex
-lrt=lrmax⋅twarmup_stepslr_t = lr_{max} \cdot \frac{t}{\text{warmup\_steps}}lrt​=lrmax​⋅warmup_stepst​
-```
-
-Prevents unstable early updates.
-
-**Cosine Annealing**
-
-```latex
-lrt=lrmin+12(lrmax−lrmin)(1+cos⁡(tTπ))lr_t = lr_{min} + \frac{1}{2}(lr_{max} - lr_{min})
-\left(1 + \cos\left(\frac{t}{T}\pi\right)\right)lrt​=lrmin​+21​(lrmax​−lrmin​)(1+cos(Tt​π))
-```
-
-Provides smooth decay and stable convergence.
-
-#### 🧪 Overfitting Sanity Test
-
-Before real training, we intentionally overfit a small random batch.
-
-Purpose:
-
-Verify gradient flow
-
-Ensure loss decreases
-
-Validate architecture correctness
-
-If the model cannot overfit one batch → implementation bug.
-
-Result: Loss decreased successfully.
-
-### 💾 Checkpointing
-
-Saved components:
-
-model.state_dict()
-
-optimizer.state_dict()
-
-scheduler.state_dict()
-
-Step count
-
-This enables:
-
-Training resumption
-
-Experiment reproducibility
-
-Model comparison
-
-Checkpoints are excluded from Git using .gitignore.
-
-#### ✅ Update - 3
-
-Training loop successfully implemented.
+*Built to understand Transformers from first principles and demonstrate production ML engineering practices.*

@@ -1,5 +1,8 @@
-__pycache__/
+.env
 .venv
+__pycache__/
+
 *.pt
 *.pth
+runs/
 checkpoints/
