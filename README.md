@@ -320,7 +320,7 @@ Each checkpoint contains the full training state:
     "model_state_dict":     model.state_dict(),
     "optimizer_state_dict": optimizer.state_dict(),
     "scheduler_state_dict": scheduler.state_dict(),
-    "global_step":          step,
+    "step":          step,
     "epoch":                epoch,
 }
 ```
@@ -476,6 +476,13 @@ df = pd.read_json('runs/experiment_1/metrics.jsonl', lines=True)
 print(df[['epoch','train_loss','val_loss','val_perplexity']].to_string())
 "
 ```
+---
+
+**📖 For detailed instructions:**
+- **Training**: See [TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md) for hyperparameter tuning, monitoring, and troubleshooting
+- **Testing**: See [TESTING_GUIDE.md](docs/TESTING_GUIDE.md) for evaluating your model on test data
+
+---
 
 ---
 

@@ -11,7 +11,7 @@ from src.training.evaluator import Evaluator
 from src.data.dataset import TextGenerationDataset
 from src.utils.seed import set_seed
 
-CONFIG_PATH='src/config/config.yaml'
+from src.constants import CONFIG_PATH
 
 def train():
     set_seed(42)

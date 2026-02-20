@@ -124,7 +124,7 @@ class Trainer:
                 "val_loss": val_loss,
                 "val_perplexity": val_ppl,
                 "epoch_time_sec": epoch_time,
-                "global_step": self.global_step,
+                "step": self.global_step,
                 "current_lr": current_lr
             }
             self.logger.log(log_data)
