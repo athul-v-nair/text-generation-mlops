@@ -40,11 +40,13 @@ class TextGenerationDataset(Dataset):
         self.tokenizer=AutoTokenizer.from_pretrained('gpt2')
         self.tokenizer.pad_token=self.tokenizer.eos_token # setting padding token as End of Sentence token(already known token)
         
-        processed_path=Path('data/processed')
+        # Initializing vocabulary size to tokenizer vocabulary size
+        self.vocab_size = len(self.tokenizer)
+        
         processed_file=Path(f"data/processed/{split}_tokens.pt")
         
-        # Check if folder does not exist OR is empty
-        if not processed_path.exists() or not any(processed_path.iterdir()):
+        # Start tokenization only if split tokenization not available
+        if not processed_file.exists():
             print("Starting tokenization")
 
             all_input_ids = []
@@ -72,12 +74,13 @@ class TextGenerationDataset(Dataset):
 
     def __len__(self):
         return self.num_sequences
-    
+
     def __getitem__(self, index):
         start=index * self.seq_length
         end=start + self.seq_length
 
         x = self.input_ids[start:end]
-        y = self.input_ids[start + 1:end + 1]
 
-        return x,y
+        return {
+            "input_ids": x
+        }

@@ -1,7 +1,11 @@
-import torch
+import torch, os
 
-def save_checkpoint(model, optimizer, scheduler, step, path):
+def save_checkpoint(model, optimizer, scheduler, step, path, epoch):
+    # check if directory exists
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
     torch.save({
+        "epoch": epoch,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),
@@ -16,4 +20,4 @@ def load_checkpoint(model, optimizer, scheduler, path, device):
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
-    return checkpoint["step"]
+    return checkpoint

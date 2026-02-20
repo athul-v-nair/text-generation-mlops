@@ -1,15 +1,21 @@
 import torch
 import torch.optim as optim
-import yaml
+import yaml,os
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+from torch.utils.data import DataLoader
 
 from src.model.decoder_transformer import DecoderTransformer
 from src.training.trainer import Trainer
-from src.training.checkpoint import save_checkpoint
+from src.training.logger import Logger
+from src.training.evaluator import Evaluator
+from src.data.dataset import TextGenerationDataset
+from src.utils.seed import set_seed
 
 CONFIG_PATH='src/config/config.yaml'
 
 def train():
+    set_seed(42)
+
     with open(CONFIG_PATH, "r") as f:
             config = yaml.safe_load(f)
 
@@ -17,10 +23,31 @@ def train():
         config['device'] if torch.cuda.is_available() else "cpu"
     )
 
+    run_dir = "runs/experiment_1"
+    os.makedirs(run_dir, exist_ok=True)
+
+    # ---- Dataset ----
+    train_dataset = TextGenerationDataset(split="train", config_path= CONFIG_PATH)
+    val_dataset = TextGenerationDataset(split="validation", config_path= CONFIG_PATH)
+    
+    vocabulary_size = train_dataset.vocab_size
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config["training"]["batch_size"],
+        shuffle=True
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config["training"]["batch_size"],
+        shuffle=False
+    )
+
     # Initialize Transformer decoder model with config hyperparameters
     model = DecoderTransformer(
-        vocabulary_size=config['training']['vocabulary_size'],
-        max_seq_len=config['training']['max_seq_len'],
+        vocabulary_size=vocabulary_size,
+        max_seq_len=config['data']['seq_length'],
         dim_model=config['training']['dim_model'],
         num_layers=config['training']['num_layers'],
         num_heads=config['training']['num_heads'],
@@ -47,31 +74,15 @@ def train():
         milestones=[config['training']['warmup_steps']]
     )
 
-    trainer = Trainer(model, optimizer, scheduler, config, device)
+    # Initializing logger and evaluator
+    logger = Logger(run_dir)
+    evaluator = Evaluator(model, config, device)
+    
+    # Initializing Trainer
+    trainer = Trainer(model, optimizer, scheduler, config, device, evaluator, logger, run_dir)
 
-    # Create dummy batch for overfitting sanity check
-    # Random integers represent token IDs
-    dummy_batch = torch.randint(
-        0,
-        config['training']['vocabulary_size'],
-        (config['training']['batch_size'], config['training']['max_seq_len'])
-    ).to(device)
-
-    # Training Loop
-    for step in range(config['training']['num_steps']):
-        loss = trainer.train_step(dummy_batch)
-
-        if step % 50 == 0:
-            print(f"Step {step} | Loss: {loss:.4f}")
-
-    # Save final model checkpoint after training
-    save_checkpoint(
-        model,
-        optimizer,
-        scheduler,
-        config['training']['num_steps'],
-        config['training']['checkpoint_path']
-    )
+    # Start the training
+    trainer.fit(train_loader, val_loader)
 
 
 if __name__ == "__main__":

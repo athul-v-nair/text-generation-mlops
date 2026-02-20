@@ -1,16 +1,29 @@
+import os, time, json
 import torch
 import torch.nn as nn
 
+from src.training.checkpoint import save_checkpoint
+
 class Trainer:
-    def __init__(self, model, optimizer, scheduler, config, device):
+    def __init__(self, model, optimizer, scheduler, config, device, evaluator, logger ,run_dir):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.config = config
         self.device = device
         self.criterion = nn.CrossEntropyLoss()
+        
+        self.evaluator = evaluator
+        self.logger = logger
 
-    def shift_logits_targets(self, logits, targets):
+        self.run_dir = run_dir
+        self.global_step=0
+        self.best_val_loss = float("inf")
+
+        # Ensure checkpoint directory exists
+        os.makedirs(os.path.join(self.run_dir, "checkpoints"), exist_ok=True)
+
+    def shift_logits_targets(self, logits, input_ids):
         """
         Align predictions with next-token targets.
 
@@ -21,19 +34,22 @@ class Trainer:
             logits -> (B, T-1, V)
             targets -> (B, T-1)
         """
-        return logits[:,:-1,:], targets[:, 1:]
-    
+        logits = logits[:, :-1, :]
+        targets = input_ids[:, 1:]
+        return logits, targets
+
+    # Single training step
     def train_step(self, batch):
-        # Set model to training mode (enables dropout, etc.)
-        self.model.train()
+        print(f"Starting training step: ", {self.global_step})
+        batch = {k: v.to(self.device) for k, v in batch.items()}
         
-        batch=batch.to(self.device)
-        
+        input_ids = batch["input_ids"]
+
         # Forward pass: compute model outputs (logits)
-        logits=self.model(batch)
+        logits=self.model(input_ids)
 
         # Shift logits and targets for next-token prediction (input t predicts token t+1)
-        logits, targets = self.shift_logits_targets(logits, batch)
+        logits, targets = self.shift_logits_targets(logits, input_ids)
 
         # Compute cross-entropy loss
         # Reshape logits to 2D (batch*seq_len, vocab_size)
@@ -54,4 +70,92 @@ class Trainer:
         self.optimizer.step()        
         self.scheduler.step()
 
-        return loss.item()       
+        self.global_step += 1
+
+        # returns loss value and tokens count
+        return loss.item(), targets.numel()     
+    
+    def train_epoch(self, dataloader, epoch):
+        """
+        Train model for full epochs as listed in config.
+        Returns average loss per token.
+        """
+        # paased epoch jst for logging
+        print(f"Starting training epoch: ", {epoch})
+
+        # Set model to training mode (enables dropout, etc.)
+        self.model.train()
+        
+        total_loss = 0.0
+        total_tokens = 0
+
+        for batch in dataloader:
+            loss, token_count = self.train_step(batch)
+            
+            total_loss += loss * token_count
+            total_tokens += token_count
+
+        avg_loss = total_loss / total_tokens
+        return avg_loss
+    
+    # Full training lifecycle
+    def fit(self, train_loader, val_loader):
+        patience = self.config["training"].get("patience", 5)
+        epochs_without_improvement = 0
+        
+
+        for epoch in range(self.config['training']['epochs']):
+            print(f"Starting training and validation epoch: ", {epoch})
+            start_time = time.time()
+
+            # training loss
+            train_loss=self.train_epoch(train_loader, epoch)
+
+            # validation loss and perplexity
+            val_loss, val_ppl = self.evaluator.evaluate(val_loader)
+
+            epoch_time = time.time() - start_time
+
+            current_lr = self.optimizer.param_groups[0]["lr"]
+
+            log_data = {
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "val_perplexity": val_ppl,
+                "epoch_time_sec": epoch_time,
+                "global_step": self.global_step,
+                "current_lr": current_lr
+            }
+            self.logger.log(log_data)
+
+            #  Save last checkpoint using YOUR function
+            save_checkpoint(
+                self.model,
+                self.optimizer,
+                self.scheduler,
+                self.global_step,
+                os.path.join(self.run_dir, "checkpoints", "last.pt"),
+                epoch
+            )
+
+            # Save best model
+            if val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+
+                save_checkpoint(
+                    self.model,
+                    self.optimizer,
+                    self.scheduler,
+                    self.global_step,
+                    os.path.join(self.run_dir, "checkpoints", "best.pt"),
+                    epoch
+                )
+                print("Saved best model!!")
+            else:
+                epochs_without_improvement += 1
+
+            # Early stopping
+            if epochs_without_improvement >= patience:
+                print("Early stopping triggered.")
+                break
