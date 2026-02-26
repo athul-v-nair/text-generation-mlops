@@ -95,7 +95,7 @@ if __name__ == "__main__":
     )
 
     # Testing a more creative model
-    prompt = "The history of Artificial Intelligence"
+    prompt = "The history of India"
     temperature = 1
     top_k = 40
 

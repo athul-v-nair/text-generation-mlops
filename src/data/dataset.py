@@ -54,7 +54,7 @@ class TextGenerationDataset(Dataset):
             # tokenizing document by document
             for text in dataset_split["text"]:
                 tokens = self.tokenizer(
-                    text,
+                    text + self.tokenizer.eos_token,
                     return_tensors="pt",
                     truncation=False
                 )["input_ids"][0]

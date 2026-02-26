@@ -38,6 +38,10 @@ class TransformerBlock(nn.Module):
             nn.Dropout(dropout)
         )
 
+        self.dropout1 = nn.Dropout(dropout)  # For attention residual
+
+
+    # Pre-LN	Norm → Attention → Add
     def forward(self,x,attn_mask):
         # Pre Layer Normalization Attention
         x_norm=self.ln1(x)
@@ -47,7 +51,7 @@ class TransformerBlock(nn.Module):
             need_weights=False
         )
 
-        x=x+attn_output
+        x=x + self.dropout1(attn_output) 
 
         # Pre-LN feed forward
         x_norm=self.ln2(x)

@@ -1,25 +1,21 @@
 data:
   dataset_name: wikitext
   dataset_config: wikitext-2-raw-v1
-  seq_length: 128   # drastically reduced for CPU training
+  seq_length: 128   
 
 training:
-  epochs: 3         # reduce for faster iteration
-  batch_size: 2     # safe for low-memory CPU
+  epochs: 20     
+  batch_size: 8
 
-  dim_model: 256    # much smaller model
+  dim_model: 256
   num_layers: 4
   num_heads: 4
   dim_ff: 1024
-  dropout: 0.1
+  dropout: 0.2
 
   learning_rate: 3e-4
-  weight_decay: 0.01
+  weight_decay: 0.05
 
-  num_steps: 3000  # small number of training steps
-  warmup_steps: 300
-  patience: 2
-
-  checkpoint_path: "checkpoints/model.pt"
+  patience: 10
 
 device: "cpu"

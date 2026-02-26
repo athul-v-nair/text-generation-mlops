@@ -29,6 +29,9 @@ class DecoderTransformer(nn.Module):
         self.token_embedding=nn.Embedding(vocabulary_size, dim_model)
         self.positional_embedding=PositionalEmbedding(max_seq_len, dim_model)
 
+        # Randomly zeros some values
+        self.embedding_dropout = nn.Dropout(dropout)
+
         self.blocks=nn.ModuleList([
             TransformerBlock(dim_model, num_heads=num_heads, dim_ff=dim_ff, dropout=dropout) for _  in range(num_layers)
         ])
@@ -37,6 +40,27 @@ class DecoderTransformer(nn.Module):
         self.head=nn.Linear(dim_model, vocabulary_size)
 
         self.max_seq_len=max_seq_len
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        """
+        Initialize weights using Xavier/Glorot initialization for better convergence.
+        """
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                # Xavier ensures signal variance is preserved across layers
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)  # start with zero bias
+            elif isinstance(module, nn.Embedding):
+                # Small embedding init prevents early overconfidence
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            elif isinstance(module, nn.LayerNorm):
+                # Clean LayerNorm prevents biasing normalization
+                torch.nn.init.ones_(module.weight) # no scaling initially
+                torch.nn.init.zeros_(module.bias) # no shifting initially
 
     def generate_causal_mask(self, seq_length, device):
         """
@@ -63,6 +87,7 @@ class DecoderTransformer(nn.Module):
         pos_emb = self.positional_embedding(x)
 
         x = token_emb + pos_emb
+        x = self.embedding_dropout(x)
 
         attn_mask = self.generate_causal_mask(seq_length, x.device)
 

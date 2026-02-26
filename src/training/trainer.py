@@ -11,7 +11,8 @@ class Trainer:
         self.scheduler = scheduler
         self.config = config
         self.device = device
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1) 
+        # Instead of target probability = 1.0, use 0.9. Distributes 0.1 probability across other tokens
         
         self.evaluator = evaluator
         self.logger = logger
@@ -40,7 +41,6 @@ class Trainer:
 
     # Single training step
     def train_step(self, batch):
-        print(f"Starting training step: ", {self.global_step})
         batch = {k: v.to(self.device) for k, v in batch.items()}
         
         input_ids = batch["input_ids"]
@@ -70,6 +70,12 @@ class Trainer:
         self.optimizer.step()        
         self.scheduler.step()
 
+        # Add this for monitoring
+        if self.global_step % 100 == 0:
+            current_lr = self.scheduler.get_last_lr()[0]
+            print(f"Step {self.global_step} | LR: {current_lr:.6f} | Loss: {loss.item():.4f}")
+    
+
         self.global_step += 1
 
         # returns loss value and tokens count
@@ -80,7 +86,7 @@ class Trainer:
         Train model for full epochs as listed in config.
         Returns average loss per token.
         """
-        # paased epoch jst for logging
+        # passed epoch jst for logging
         print(f"Starting training epoch: ", {epoch})
 
         # Set model to training mode (enables dropout, etc.)
@@ -141,7 +147,9 @@ class Trainer:
 
             # Save best model
             if val_loss < self.best_val_loss:
+                improvement = self.best_val_loss - val_loss
                 self.best_val_loss = val_loss
+                epochs_without_improvement = 0
 
                 save_checkpoint(
                     self.model,
@@ -152,8 +160,11 @@ class Trainer:
                     epoch
                 )
                 print("Saved best model!!")
+                print(f"✓ New best model! (improved by {improvement:.4f})")
             else:
                 epochs_without_improvement += 1
+                print(f"No improvement for {epochs_without_improvement} epoch(s)")
+
 
             # Early stopping
             if epochs_without_improvement >= patience:
