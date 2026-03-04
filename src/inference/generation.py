@@ -47,11 +47,11 @@ class TextGeneration:
             logits: (1, vocab_size)
         
         Returns:
-            next_token: (1,)
+            next_token: (1,1)
         """
         # argmax returns the INDEX of the maximum value
         # Example: logits = [0.1, 0.7, 0.2] → argmax = 1
-        next_token = torch.argmax(logits, dim=2, keepdim=True)
+        next_token = torch.argmax(logits, dim=-1, keepdim=True)
         return next_token
     
     def _temperature_sample(self, logits: torch.Tensor, temperature: float) -> torch.Tensor:
@@ -66,7 +66,7 @@ class TextGeneration:
             temperature: float (typically 0.7 to 1.5)
         
         Returns:
-            next_token: (1,)
+            next_token: (1,1)
         """
         # Divide logits by temperature BEFORE softmax
         # This changes the "sharpness" of the distribution
@@ -78,7 +78,8 @@ class TextGeneration:
         # Sample from the probability distribution
         # multinomial picks one token based on probabilities
         next_token = torch.multinomial(probabilities, num_samples=1)
-        return next_token.squeeze()
+
+        return next_token.view(1, 1)
     
     def _top_k_sample(self, logits: torch.Tensor, top_k: int, temperature: float) -> torch.Tensor:
         """
@@ -92,7 +93,7 @@ class TextGeneration:
             temperature: Sampling temperature
         
         Returns:
-            next_token: (1,)
+            next_token: (1,1)
         """
         top_k_logits, top_k_indices = torch.topk(logits, k=top_k, dim=-1)
 
@@ -109,7 +110,7 @@ class TextGeneration:
         probabilities = torch.nn.functional.softmax(logits)
         next_token = torch.multinomial(probabilities, num_samples=1)
 
-        return next_token.squeeze()
+        return next_token.view(1, 1)
     
     def _top_p_sample(self, logits: torch.Tensor, top_p: float, temperature: float) -> torch.Tensor:
         """
@@ -125,7 +126,7 @@ class TextGeneration:
             temperature: Sampling temperature
         
         Returns:
-            next_token: (1,)
+            next_token: (1,1)
         """
         # Apply temperature first
         logits = logits / temperature
@@ -164,7 +165,7 @@ class TextGeneration:
         # Sample from the filtered distribution
         next_token = torch.multinomial(original_probs, num_samples=1)
         
-        return next_token.squeeze()
+        return next_token.view(1, 1)
     
     def _combined_sample(self, logits: torch.Tensor, temperature: float, top_p: float) -> torch.Tensor:
         """
@@ -180,7 +181,7 @@ class TextGeneration:
             top_p: Nucleus threshold
         
         Returns:
-            next_token: (1,)
+            next_token: (1,1)
         """
         # Just call top_p_sample, which already applies temperature internally
         return self._top_p_sample(logits, top_p, temperature)
@@ -315,7 +316,7 @@ class TextGeneration:
             
             # Add the new token to our sequence
             # input_ids shape: (1, current_length) → (1, current_length + 1)
-            next_token = next_token.unsqueeze(0).unsqueeze(1)
+            next_token = next_token.view(1, 1)      # FORCE correct shape
             input_ids = torch.cat([input_ids, next_token], dim=1)
             
             # Track this token for repetition penalty
