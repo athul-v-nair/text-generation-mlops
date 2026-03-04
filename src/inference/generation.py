@@ -28,13 +28,13 @@ class TextGeneration:
             dropout=self.config['training']['dropout']
         ).to(self.device)
 
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.checkpoint = torch.load(checkpoint_path, map_location=self.device)
 
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.load_state_dict(self.checkpoint['model_state_dict'])
         self.model.eval()
 
         print(f"✓ Model loaded from {checkpoint_path}")
-        print(f"✓ Trained for {checkpoint.get('epoch', 'unknown')} epochs")
+        print(f"✓ Trained for {self.checkpoint.get('epoch', 'unknown')} epochs")
         print(f"✓ Device: {self.device}\n")
 
     # ==================== SAMPLING STRATEGIES ====================
@@ -51,7 +51,7 @@ class TextGeneration:
         """
         # argmax returns the INDEX of the maximum value
         # Example: logits = [0.1, 0.7, 0.2] → argmax = 1
-        next_token = torch.argmax(logits, dim=-10)
+        next_token = torch.argmax(logits, dim=2, keepdim=True)
         return next_token
     
     def _temperature_sample(self, logits: torch.Tensor, temperature: float) -> torch.Tensor:
@@ -235,6 +235,7 @@ class TextGeneration:
         ]
         
         for strategy, params in strategies:
+            print(strategy, params)
             label = f"{strategy}"
             if params:
                 label += f" ({', '.join(f'{k}={v}' for k, v in params.items())})"
