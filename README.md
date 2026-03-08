@@ -199,7 +199,7 @@ avg_loss = total_loss / total_tokens          # true per-token average
 The total gradient norm is clipped to `1.0` after every backward pass:
 
 $$
-g \leftarrow g \cdot \frac{\text{max\_norm}}{\|g\|} \quad \text{where} \quad \|g\| = \sqrt{\sum_i \|g_i\|^2}
+g \leftarrow g \cdot \frac{\text{max\_norm}}{|g|} \quad \text{where} \quad |g| = \sqrt{\sum_i |g_i|^2}
 $$
 
 An observed pre-clip gradient norm of ~220 confirms this is a necessary safeguard for stable Transformer training.
@@ -219,7 +219,7 @@ SGD was tested and produced large loss oscillations. AdamW's per-parameter adapt
 **Linear warmup** — ramps LR from 1% of peak to full over `warmup_steps`:
 
 $$
-lr_t = lr_{\max} \cdot \frac{t}{\text{warmup\_steps}}
+lr_t = lr_{\max} \cdot \frac{t}{\mathrm{warmup\_steps}}
 $$
 
 **Cosine annealing** — smooth decay after warmup:
